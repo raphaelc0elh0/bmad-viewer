@@ -2,6 +2,8 @@ import { readdirSync, existsSync, statSync, readFileSync } from 'node:fs';
 import { join, extname, basename, relative, dirname } from 'node:path';
 import { parseYaml } from '../parsers/parse-yaml.js';
 import { parseMarkdownContent } from '../parsers/parse-markdown.js';
+import { parseCsv } from '../parsers/parse-csv.js';
+import { escapeHtml } from '../utils/html-escape.js';
 import { ErrorAggregator } from '../utils/error-aggregator.js';
 
 /**
@@ -159,6 +161,19 @@ function buildWikiData(bmadPath, aggregator) {
 			}
 		}
 
+		// v6 fallback: some installs keep skill bodies outside _bmad/<module>/ (e.g. under
+		// .claude/skills/), leaving only config.yaml + module-help.csv here. When neither the
+		// new-style nor legacy scans found anything, build the catalog from module-help.csv so
+		// the module still lists its skills instead of vanishing from the wiki.
+		const foundAnyItem = Object.values(groupMap).some(g => g.items.length > 0);
+		if (!foundAnyItem) {
+			const csvItems = buildItemsFromModuleHelp(modPath, modName, aggregator);
+			if (csvItems.length > 0) {
+				groupMap.__manifest__ = { name: 'Skills', type: 'skill', items: csvItems, _sortKey: '' };
+				allItems.push(...csvItems);
+			}
+		}
+
 		// Sort groups alphabetically and attach to module
 		moduleData.groups = Object.values(groupMap)
 			.filter(g => g.items.length > 0)
@@ -171,6 +186,66 @@ function buildWikiData(bmadPath, aggregator) {
 	}
 
 	return { modules, allItems };
+}
+
+/**
+ * Build wiki items for a module from its module-help.csv manifest.
+ * Used when the module directory holds no SKILL.md/workflow files (BMAD v6 installs that
+ * relocate skill bodies). Each non-meta row becomes a catalog entry keyed by skill id, with
+ * its description and menu metadata rendered as the detail view.
+ *
+ * @param {string} modPath
+ * @param {string} modName
+ * @param {ErrorAggregator} aggregator
+ * @returns {Array<object>}
+ */
+function buildItemsFromModuleHelp(modPath, modName, aggregator) {
+	const csvPath = join(modPath, 'module-help.csv');
+	if (!existsSync(csvPath)) return [];
+
+	const result = parseCsv(csvPath);
+	if (result.errors && result.errors.length > 0) aggregator.addResult(csvPath, result);
+
+	const items = [];
+	for (const row of result.data || []) {
+		const skill = (row.skill || '').trim();
+		if (!skill || skill === '_meta') continue;
+
+		const displayName = (row['display-name'] || '').trim() || formatName(skill);
+		const description = (row.description || '').trim();
+		items.push({
+			id: `${modName}/${skill}`,
+			name: displayName,
+			type: 'skill',
+			path: csvPath,
+			html: renderModuleHelpCard(displayName, description, row),
+			frontmatter: null,
+			raw: `${displayName}\n${description}`,
+		});
+	}
+	return items;
+}
+
+/**
+ * Render the detail HTML for a skill cataloged from module-help.csv.
+ */
+function renderModuleHelpCard(name, description, row) {
+	const rows = [
+		['Menu code', row['menu-code']],
+		['Phase', row.phase],
+		['Outputs', row.outputs],
+		['Output location', row['output-location']],
+	].filter(([, value]) => value && String(value).trim() !== '');
+
+	const desc = description
+		? `<p>${escapeHtml(description)}</p>`
+		: '<p><em>No description provided in the manifest.</em></p>';
+	const meta = rows.length > 0
+		? `<ul class="skill-meta">${rows.map(([label, value]) => `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(value))}</li>`).join('')}</ul>`
+		: '';
+	const note = '<p class="skill-source-note">Cataloged from <code>module-help.csv</code>; the full skill body is not stored under <code>_bmad/</code> in this install.</p>';
+
+	return `<h1>${escapeHtml(name)}</h1>${desc}${meta}${note}`;
 }
 
 /**

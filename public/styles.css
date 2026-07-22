@@ -274,3 +274,9 @@ mark.search-highlight{background:rgba(245,158,11,.4);color:var(--text);border-ra
 /* Per-feature epic groups in the sidebar */
 .sidebar-nav__feature-group{list-style:none;margin:0 0 10px}
 .sidebar-nav__feature-heading{display:flex;align-items:center;gap:6px;margin:8px 0 4px;padding:0 8px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
+
+/* Skill cards cataloged from module-help.csv (no full SKILL.md body available) */
+.skill-meta{list-style:none;padding:0;margin:16px 0;display:flex;flex-direction:column;gap:4px}
+.skill-meta li{font-size:.85rem;color:var(--text-muted)}
+.skill-meta strong{color:var(--text)}
+.skill-source-note{margin-top:20px;padding:10px 12px;font-size:.8rem;color:var(--text-muted);background:var(--bg-alt);border-left:3px solid var(--border);border-radius:0 var(--radius) var(--radius) 0}
