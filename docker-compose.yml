@@ -1,0 +1,11 @@
+services:
+  bmad-viewer:
+    build: .
+    # Mount the BMAD project to view at /project. Point BMAD_PROJECT at its path
+    # (defaults to the directory you run compose from). Drop the ":ro" suffix to let
+    # the kanban save sprint-status changes back to the project.
+    volumes:
+      - "${BMAD_PROJECT:-.}:/project:ro"
+    ports:
+      - "${BMAD_VIEWER_PORT:-4000}:4000"
+    # Then open http://localhost:4000

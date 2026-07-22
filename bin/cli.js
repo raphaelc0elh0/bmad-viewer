@@ -13,6 +13,7 @@ const args = process.argv.slice(2);
 // Parse CLI flags
 const flags = {
 	port: null,
+	host: null,
 	path: null,
 	output: null,
 	noOpen: false,
@@ -33,6 +34,9 @@ for (let i = 0; i < args.length; i++) {
 		case '--port':
 		case '-p':
 			flags.port = Number.parseInt(args[++i], 10);
+			break;
+		case '--host':
+			flags.host = args[++i];
 			break;
 		case '--path':
 			flags.path = args[++i];
@@ -71,6 +75,7 @@ Usage:
 
 Options:
   --port, -p <port>    Set server port (default: auto-detect from 4000)
+  --host <host>        Bind address (default: 127.0.0.1; use 0.0.0.0 in Docker)
   --path <dir>         Path to BMAD project (default: auto-detect _bmad/)
   --output, -o <dir>   Generate static HTML files (no server)
   --no-open            Don't open browser automatically
@@ -82,6 +87,7 @@ Examples:
   npx bmad-viewer                          Auto-detect and serve
   npx bmad-viewer --port 8080              Use specific port
   npx bmad-viewer --path ./my-project      Specify project path
+  npx bmad-viewer --host 0.0.0.0           Bind all interfaces (containers)
   npx bmad-viewer --output ./docs          Generate static files
   npx bmad-viewer --install-skill          Install Claude Code slash command
 `);
@@ -173,6 +179,7 @@ if (flags.output) {
 // Server mode (default)
 await startServer({
 	port: flags.port,
+	host: flags.host || undefined,
 	bmadDir,
 	open: !flags.noOpen,
 });
