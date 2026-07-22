@@ -262,3 +262,15 @@ mark.search-highlight{background:rgba(245,158,11,.4);color:var(--text);border-ra
 @media(max-width:920px){.kanban{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:768px){.app-layout{grid-template-columns:1fr}.app-layout__sidebar{max-height:none;position:static;border-right:none;border-bottom:1px solid var(--border)}.kanban{grid-template-columns:1fr}.kanban-toolbar{align-items:flex-start;flex-direction:column}.platform-launcher__header{align-items:flex-start;flex-direction:column}.platform-launcher__actions{justify-content:flex-start}.platform-launcher__summary{width:100%;align-items:flex-start;flex-direction:column}.platform-launcher__summary-link{margin-left:0}.platform-chip{min-width:min(100%,220px)}.integration-modal{padding:12px}.integration-modal__content{padding:18px 16px}.integration-pane__intro{flex-direction:column}.integration-panel__grid{grid-template-columns:1fr}.stats-box{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:440px){.header-bar__shortcut{display:none}.stats-box{grid-template-columns:1fr}.lens-tabs__tab{padding:8px 12px;font-size:.85rem}}
+
+/* Feature board switch (multi-feature projects) */
+.feature-switch{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}
+.feature-switch__pill{display:flex;align-items:center;gap:8px;padding:6px 14px;background:var(--card-bg);border:1px solid var(--border);border-radius:999px;cursor:pointer;color:var(--text-muted);font-size:.85rem;font-weight:600;transition:border-color .15s,color .15s,background .15s}
+.feature-switch__pill:hover{color:var(--text);border-color:var(--primary)}
+.feature-switch__pill--active{color:var(--primary);border-color:var(--primary);background:var(--accent-soft)}
+.feature-switch__count{font-size:.72rem;font-weight:600;color:var(--text-muted);background:var(--badge-bg);border-radius:999px;padding:1px 8px}
+.feature-switch__pill--active .feature-switch__count{color:var(--primary)}
+.feature-board[hidden]{display:none}
+/* Per-feature epic groups in the sidebar */
+.sidebar-nav__feature-group{list-style:none;margin:0 0 10px}
+.sidebar-nav__feature-heading{display:flex;align-items:center;gap:6px;margin:8px 0 4px;padding:0 8px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}

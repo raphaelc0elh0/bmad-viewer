@@ -18,6 +18,7 @@ export function renderDashboard(dataModel) {
 		modules: wiki.modules,
 		artifacts: project.artifacts,
 		epics: project.epics,
+		featureBoards: project.featureBoards,
 		artifactGroups: project.artifactGroups,
 	});
 
@@ -38,13 +39,13 @@ export function renderDashboard(dataModel) {
 	</main>
 </div>`;
 
-	// Build project view
-	const storyList = project.storyList || [];
-	const backlog = storyList.filter((s) => s.status === 'backlog');
-	const readyForDev = storyList.filter((s) => s.status === 'ready-for-dev');
-	const inProgress = storyList.filter((s) => s.status === 'in-progress');
-	const review = storyList.filter((s) => s.status === 'review');
-	const done = storyList.filter((s) => s.status === 'done');
+	// Build project view. A project may track several features in parallel — render one
+	// board section per feature and a switch to move between them. Classic single-board
+	// projects render exactly one section (no switch, drag-and-drop preserved).
+	const featureBoards = (project.featureBoards && project.featureBoards.length > 0)
+		? project.featureBoards
+		: [{ key: 'sprint', label: 'Sprint', feature: null, stories: project.stories, storyList: project.storyList || [], epics: project.epics, board: project.board }];
+	const multiFeature = featureBoards.length > 1;
 
 	const noData = project.epics.length === 0 && project.stories.total === 0;
 	const configPanel = `<div class="path-config-panel${noData ? '' : ' path-config-panel--collapsed'}" id="path-config-panel">
@@ -74,57 +75,47 @@ export function renderDashboard(dataModel) {
 	</div>
 </div>`;
 
-	// Mix bugs and pendientes into kanban columns as cards
-	const pendingGlobal = (project.pendingItems || []).filter(i => !i.done).map(i => ({
-		id: `global-${i.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-		title: i.title,
-		status: 'backlog',
-		epic: 'Global',
-		detail: i.detail,
-		cardType: 'global',
-	}));
-	const doneGlobal = (project.pendingItems || []).filter(i => i.done).map(i => ({
-		id: `global-${i.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-		title: i.title,
-		status: 'done',
-		epic: 'Global',
-		cardType: 'global',
-	}));
-	const bugCards = (project.bugs || []).map(b => ({
-		id: b.id.toLowerCase(),
-		title: b.description,
-		status: b.status,
-		epic: b.id,
-		cardType: 'bug',
-	}));
-	const boardColumns = [
-		{ key: 'backlog', title: 'Backlog', stories: [...backlog, ...pendingGlobal, ...bugCards.filter((card) => card.status === 'backlog')] },
-		{ key: 'ready-for-dev', title: 'Ready for Dev', stories: [...readyForDev, ...bugCards.filter((card) => card.status === 'ready-for-dev')] },
-		{ key: 'in-progress', title: 'In Progress', stories: [...inProgress, ...bugCards.filter((card) => card.status === 'in-progress')] },
-		{ key: 'review', title: 'Review', stories: [...review, ...bugCards.filter((card) => card.status === 'review')] },
-		{ key: 'done', title: 'Done', stories: [...done, ...doneBugsAndGlobals(bugCards, doneGlobal)] },
-	];
+	// Global bugs and pending items aren't tied to a feature — attach them to the first board only.
+	const globals = {
+		pendingBacklog: (project.pendingItems || []).filter(i => !i.done).map(i => ({
+			id: `global-${i.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+			title: i.title, status: 'backlog', epic: 'Global', detail: i.detail, cardType: 'global',
+		})),
+		pendingDone: (project.pendingItems || []).filter(i => i.done).map(i => ({
+			id: `global-${i.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+			title: i.title, status: 'done', epic: 'Global', cardType: 'global',
+		})),
+		bugs: (project.bugs || []).map(b => ({
+			id: b.id.toLowerCase(), title: b.description, status: b.status, epic: b.id, cardType: 'bug',
+		})),
+	};
 
-	const boardMessage = project.board?.editable
-		? '<div class="kanban-toolbar"><p class="kanban-toolbar__hint">Drag story cards between BMAD states. The viewer saves <code>sprint-status</code> locally and syncs connected platforms when available.</p><span class="kanban-toolbar__status" id="board-save-status" aria-live="polite"></span></div>'
-		: '<div class="kanban-toolbar"><p class="kanban-toolbar__hint">Read-only board. Add a writable <code>sprint-status</code> file to enable drag and drop updates.</p></div>';
+	const boardSections = featureBoards
+		.map((fb, i) => renderFeatureBoardSection(fb, {
+			globals: i === 0 ? globals : null,
+			// Drag-and-drop persists to a single sprint-status file, so only enable it for
+			// a lone editable board. Per-feature boards render read-only for now.
+			editable: !multiFeature && !!fb.board?.editable,
+			active: i === 0,
+			multiFeature,
+		}))
+		.join('\n');
+
+	const featureSwitch = multiFeature
+		? `<div class="feature-switch" role="tablist" aria-label="Feature boards">
+		${featureBoards.map((fb, i) => `<button class="feature-switch__pill${i === 0 ? ' feature-switch__pill--active' : ''}" role="tab" aria-selected="${i === 0 ? 'true' : 'false'}" data-feature-target="${escapeHtml(fb.key)}">
+			<span class="feature-switch__name">${escapeHtml(fb.label)}</span>
+			<span class="feature-switch__count">${fb.stories.done}/${fb.stories.total}</span>
+		</button>`).join('\n')}
+	</div>`
+		: '';
 
 	const projectContent = `<div id="project-view" hidden>
 	<div id="project-dashboard">
 		${configPanel}
-		${StatsBox({
-			total: project.stories.total,
-			pending: project.stories.pending,
-			inProgress: project.stories.inProgress,
-			done: project.stories.done,
-			inProgressLabel: 'Active',
-		})}
-		${ProgressBar({ completed: project.stories.done, total: project.stories.total })}
 		${renderIntegrationsLauncher()}
-		${boardMessage}
-		<div class="kanban" data-board-editable="${project.board?.editable ? 'true' : 'false'}">
-			${boardColumns.map((column) => KanbanColumn({ title: column.title, stories: column.stories, columnId: column.key, editable: project.board?.editable })).join('\n')}
-		</div>
+		${featureSwitch}
+		${boardSections}
 	</div>
 	${renderIntegrationsModal()}
 	<main class="content-area" id="project-content-area" hidden>
@@ -150,11 +141,40 @@ export function renderDashboard(dataModel) {
 	});
 }
 
-function doneBugsAndGlobals(bugCards, doneGlobal) {
-	return [
-		...bugCards.filter((card) => card.status === 'done'),
-		...doneGlobal,
+// Terminal statuses shown in the Done column (superseded/cancelled work is closed, not backlog).
+const DONE_STATES = new Set(['done', 'superseded', 'cancelled', 'descoped']);
+
+/**
+ * Render one feature's dashboard section: stats, progress, and a kanban board.
+ * Global bug/pending cards ride along on the first section only (via `globals`).
+ *
+ * @param {object} fb - A feature board { key, label, stories, storyList, epics, board }
+ * @param {{globals: object|null, editable: boolean, active: boolean, multiFeature: boolean}} opts
+ */
+function renderFeatureBoardSection(fb, { globals, editable, active, multiFeature }) {
+	const storyList = fb.storyList || [];
+	const inState = (state) => storyList.filter((s) => s.status === state);
+	const bugs = globals?.bugs || [];
+	const columns = [
+		{ key: 'backlog', title: 'Backlog', stories: [...inState('backlog'), ...(globals?.pendingBacklog || []), ...bugs.filter((c) => c.status === 'backlog')] },
+		{ key: 'ready-for-dev', title: 'Ready for Dev', stories: [...inState('ready-for-dev'), ...bugs.filter((c) => c.status === 'ready-for-dev')] },
+		{ key: 'in-progress', title: 'In Progress', stories: [...inState('in-progress'), ...bugs.filter((c) => c.status === 'in-progress')] },
+		{ key: 'review', title: 'Review', stories: [...inState('review'), ...bugs.filter((c) => c.status === 'review')] },
+		{ key: 'done', title: 'Done', stories: [...storyList.filter((s) => DONE_STATES.has(s.status)), ...bugs.filter((c) => DONE_STATES.has(c.status)), ...(globals?.pendingDone || [])] },
 	];
+
+	const message = editable
+		? '<div class="kanban-toolbar"><p class="kanban-toolbar__hint">Drag story cards between BMAD states. The viewer saves <code>sprint-status</code> locally and syncs connected platforms when available.</p><span class="kanban-toolbar__status" id="board-save-status" aria-live="polite"></span></div>'
+		: `<div class="kanban-toolbar"><p class="kanban-toolbar__hint">Read-only board.${multiFeature ? ' Drag-and-drop is disabled while several feature boards are tracked.' : ' Add a writable <code>sprint-status</code> file to enable drag and drop updates.'}</p></div>`;
+
+	return `<section class="feature-board" data-feature="${escapeHtml(fb.key)}"${active ? '' : ' hidden'}>
+		${StatsBox({ total: fb.stories.total, pending: fb.stories.pending, inProgress: fb.stories.inProgress, done: fb.stories.done, inProgressLabel: 'Active' })}
+		${ProgressBar({ completed: fb.stories.done, total: fb.stories.total })}
+		${message}
+		<div class="kanban" data-board-editable="${editable ? 'true' : 'false'}">
+			${columns.map((column) => KanbanColumn({ title: column.title, stories: column.stories, columnId: column.key, editable })).join('\n')}
+		</div>
+	</section>`;
 }
 
 function renderIntegrationsLauncher() {
@@ -313,9 +333,13 @@ function buildContentMap(wiki, project) {
 		};
 	}
 
-	// Stories from sprint status + epics.md content
+	// Stories from sprint status + epics.md content, across every feature board.
 	const storyContents = project.storyContents || {};
-	for (const epic of project.epics) {
+	const boardsForContent = (project.featureBoards && project.featureBoards.length > 0)
+		? project.featureBoards
+		: [{ epics: project.epics }];
+	const allEpics = boardsForContent.flatMap((fb) => fb.epics || []);
+	for (const epic of allEpics) {
 		for (const story of epic.stories) {
 			const key = `story/${story.id}`;
 			if (!map[key]) {
