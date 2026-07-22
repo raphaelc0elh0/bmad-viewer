@@ -64,12 +64,33 @@ bmad-viewer [options]
 
 Options:
   --port <number>       Custom port (default: auto-detect from 3000)
+  --host <host>         Bind address (default: 127.0.0.1; use 0.0.0.0 in Docker)
   --path <directory>    Path to BMAD project (default: auto-detect _bmad/ in cwd)
   --output <directory>  Generate static HTMLs (no server)
   --no-open             Don't open browser automatically
   --version             Show version
   --help                Show help
 ```
+
+## Run with Docker
+
+Serve any BMAD project by bind-mounting it at `/project`:
+
+```bash
+docker build -t bmad-viewer .
+docker run --rm -p 4000:4000 -v /path/to/your/project:/project:ro bmad-viewer
+# then open http://localhost:4000
+```
+
+Or with Compose, from inside your BMAD project (or set `BMAD_PROJECT` to its path):
+
+```bash
+BMAD_PROJECT=/path/to/your/project docker compose up
+```
+
+The container binds `0.0.0.0` and never opens a browser. The mount is read-only;
+drop the `:ro` suffix (or edit `docker-compose.yml`) to let the kanban save
+`sprint-status` changes back to your project.
 
 ## How it works
 

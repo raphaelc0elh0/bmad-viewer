@@ -1,0 +1,9 @@
+.git
+.github
+node_modules
+tests
+docs
+apps
+_bmad-output
+*.log
+.DS_Store
