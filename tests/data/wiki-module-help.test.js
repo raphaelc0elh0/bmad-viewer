@@ -19,7 +19,10 @@ describe('wiki module-help.csv fallback', () => {
 			'module,skill,display-name,menu-code,description,action,args,phase,preceded-by,followed-by,required,output-location,outputs\n' +
 			'Alpha,_meta,,,,,,,,,false,,\n' +
 			'Alpha,alpha-plan,Plan It,PL,Plan the work before doing it.,,,anytime,,,false,out,a plan\n' +
-			'Alpha,alpha-nodesc,,ND,,,,anytime,,,false,,\n');
+			'Alpha,alpha-nodesc,,ND,,,,anytime,,,false,,\n' +
+			// One skill exposing two menu commands — must produce two entries with distinct ids.
+			'Alpha,alpha-multi,Build Thing,BT,Build the thing.,,,anytime,,,false,,\n' +
+			'Alpha,alpha-multi,Check Thing,CT,Check the thing.,,,anytime,,,false,,\n');
 
 		// Module `beta`: a real SKILL.md — the manifest fallback must NOT override it.
 		mkdirSync(join(bmad, 'beta', 'beta-build'), { recursive: true });
@@ -35,9 +38,21 @@ describe('wiki module-help.csv fallback', () => {
 		const alpha = wiki.modules.find((m) => m.id === 'alpha');
 		assert.ok(alpha, 'alpha module should be present');
 		const items = alpha.groups.flatMap((g) => g.items);
-		// _meta is skipped; alpha-plan + alpha-nodesc remain.
-		assert.deepEqual(items.map((i) => i.name).sort(), ['Alpha Nodesc', 'Plan It']);
+		// _meta is skipped; alpha-plan + alpha-nodesc + the two alpha-multi commands remain.
+		assert.deepEqual(items.map((i) => i.name).sort(), ['Alpha Nodesc', 'Build Thing', 'Check Thing', 'Plan It']);
 		assert.equal(items.every((i) => i.type === 'skill'), true);
+	});
+
+	it('gives every menu command a unique id (no content-map collisions)', () => {
+		const { wiki } = buildDataModel(root);
+		const items = wiki.modules.find((m) => m.id === 'alpha').groups.flatMap((g) => g.items);
+		const ids = items.map((i) => i.id);
+		assert.equal(new Set(ids).size, ids.length, 'ids must be unique');
+		// A single skill with two commands yields two distinct, menu-code-disambiguated ids.
+		const multi = items.filter((i) => i.id.startsWith('alpha/alpha-multi'));
+		assert.deepEqual(multi.map((i) => i.id).sort(), ['alpha/alpha-multi/bt', 'alpha/alpha-multi/ct']);
+		// A single-command skill keeps the clean id.
+		assert.ok(ids.includes('alpha/alpha-plan'));
 	});
 
 	it('renders the description and menu metadata in the detail HTML', () => {

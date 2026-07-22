@@ -191,8 +191,13 @@ function buildWikiData(bmadPath, aggregator) {
 /**
  * Build wiki items for a module from its module-help.csv manifest.
  * Used when the module directory holds no SKILL.md/workflow files (BMAD v6 installs that
- * relocate skill bodies). Each non-meta row becomes a catalog entry keyed by skill id, with
- * its description and menu metadata rendered as the detail view.
+ * relocate skill bodies). Each non-meta row is a menu command and becomes its own catalog
+ * entry.
+ *
+ * A single skill can expose several menu commands (e.g. the tech-writer skill has "Write
+ * Document", "Validate Document", …), so `${module}/${skill}` is NOT unique per row. Ids must
+ * stay unique or the client's content map collapses collisions and clicking one entry renders
+ * another — disambiguate shared skills with the menu-code (then a counter as a last resort).
  *
  * @param {string} modPath
  * @param {string} modName
@@ -206,15 +211,37 @@ function buildItemsFromModuleHelp(modPath, modName, aggregator) {
 	const result = parseCsv(csvPath);
 	if (result.errors && result.errors.length > 0) aggregator.addResult(csvPath, result);
 
-	const items = [];
-	for (const row of result.data || []) {
-		const skill = (row.skill || '').trim();
-		if (!skill || skill === '_meta') continue;
+	const rows = (result.data || []).filter((r) => {
+		const skill = (r.skill || '').trim();
+		return skill && skill !== '_meta';
+	});
 
+	// Count rows per skill so single-command skills keep the clean `${module}/${skill}` id.
+	const rowsPerSkill = {};
+	for (const row of rows) {
+		const skill = row.skill.trim();
+		rowsPerSkill[skill] = (rowsPerSkill[skill] || 0) + 1;
+	}
+
+	const items = [];
+	const usedIds = new Set();
+	for (const row of rows) {
+		const skill = row.skill.trim();
 		const displayName = (row['display-name'] || '').trim() || formatName(skill);
 		const description = (row.description || '').trim();
+
+		let id = `${modName}/${skill}`;
+		if (rowsPerSkill[skill] > 1) {
+			const menuCode = (row['menu-code'] || '').trim().toLowerCase();
+			id = `${id}/${menuCode || slugify(displayName)}`;
+		}
+		// Guarantee uniqueness even if two commands share a menu-code / slugify identically.
+		let uniqueId = id;
+		for (let n = 2; usedIds.has(uniqueId); n++) uniqueId = `${id}-${n}`;
+		usedIds.add(uniqueId);
+
 		items.push({
-			id: `${modName}/${skill}`,
+			id: uniqueId,
 			name: displayName,
 			type: 'skill',
 			path: csvPath,
@@ -224,6 +251,13 @@ function buildItemsFromModuleHelp(modPath, modName, aggregator) {
 		});
 	}
 	return items;
+}
+
+/**
+ * Lowercase kebab slug for building stable ids from a human label.
+ */
+function slugify(text) {
+	return String(text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
 /**
