@@ -19,7 +19,7 @@ const CATEGORY_ORDER = [
  * @param {{modules: Array, artifacts: Array, epics: Array, artifactGroups: object}} props
  * @returns {string} HTML string
  */
-export function SidebarNav({ modules, artifacts, epics, artifactGroups }) {
+export function SidebarNav({ modules, artifacts, epics, featureBoards, artifactGroups }) {
 	// Wiki sidebar content
 	const modulesList = (modules || [])
 		.map(
@@ -57,33 +57,17 @@ export function SidebarNav({ modules, artifacts, epics, artifactGroups }) {
 		)
 		.join('\n');
 
-	// Project sidebar: Sprint Dashboard link + Epics with stories + Categorized Artifacts
-	const epicsList = (epics || [])
-		.map(
-			(epic) => `
-		<li class="sidebar-nav__module">
-			<button class="sidebar-nav__toggle sidebar-nav__toggle--epic" aria-expanded="false" data-epic="${escapeHtml(epic.num)}">
-				<span class="sidebar-nav__arrow">&#9656;</span>
-				<span class="sidebar-nav__epic-icon">${getEpicStatusIcon(epic.status)}</span>
-				<span class="sidebar-nav__epic-label">E${escapeHtml(epic.num)}</span>
-				<span class="sidebar-nav__epic-name">${escapeHtml(epic.name)}</span>
-			</button>
-			<ul class="sidebar-nav__items" hidden>
-				${(epic.stories || [])
-					.map(
-						(story) =>
-							`<li class="sidebar-nav__item">
-						<a href="#project/story/${escapeHtml(story.id)}" class="sidebar-nav__link" data-id="story/${escapeHtml(story.id)}">
-							<span class="sidebar-nav__status-dot sidebar-nav__status-dot--${escapeHtml(story.status)}"></span>
-							${escapeHtml(story.title)}
-						</a>
-					</li>`,
-					)
-					.join('\n')}
-			</ul>
-		</li>`,
-		)
-		.join('\n');
+	// Project sidebar: Sprint Dashboard link + Epics with stories + Categorized Artifacts.
+	// With several feature boards, group the epics under each feature so the tree mirrors
+	// the parallel work; a single board keeps the flat Epics list.
+	const boards = (featureBoards || []).filter((b) => (b.epics || []).length > 0);
+	const epicsList = boards.length > 1
+		? boards.map((board) => `
+		<li class="sidebar-nav__feature-group">
+			<h3 class="sidebar-nav__feature-heading">${escapeHtml(board.label)} <span class="sidebar-nav__count">${board.stories.done}/${board.stories.total}</span></h3>
+			<ul class="sidebar-nav__list">${renderEpicItems(board.epics)}</ul>
+		</li>`).join('\n')
+		: renderEpicItems(epics || []);
 
 	// Build categorized artifact sections
 	const groups = artifactGroups || {};
@@ -134,6 +118,38 @@ export function SidebarNav({ modules, artifacts, epics, artifactGroups }) {
 		<ul class="sidebar-nav__list">${categorySections}</ul>` : ''}
 	</div>
 </nav>`;
+}
+
+/**
+ * Render a list of epic <li> items (each an expandable epic with its stories).
+ */
+function renderEpicItems(epics) {
+	return (epics || [])
+		.map(
+			(epic) => `
+		<li class="sidebar-nav__module">
+			<button class="sidebar-nav__toggle sidebar-nav__toggle--epic" aria-expanded="false" data-epic="${escapeHtml(epic.num)}">
+				<span class="sidebar-nav__arrow">&#9656;</span>
+				<span class="sidebar-nav__epic-icon">${getEpicStatusIcon(epic.status)}</span>
+				<span class="sidebar-nav__epic-label">E${escapeHtml(epic.num)}</span>
+				<span class="sidebar-nav__epic-name">${escapeHtml(epic.name)}</span>
+			</button>
+			<ul class="sidebar-nav__items" hidden>
+				${(epic.stories || [])
+					.map(
+						(story) =>
+							`<li class="sidebar-nav__item">
+						<a href="#project/story/${escapeHtml(story.id)}" class="sidebar-nav__link" data-id="story/${escapeHtml(story.id)}">
+							<span class="sidebar-nav__status-dot sidebar-nav__status-dot--${escapeHtml(story.status)}"></span>
+							${escapeHtml(story.title)}
+						</a>
+					</li>`,
+					)
+					.join('\n')}
+			</ul>
+		</li>`,
+		)
+		.join('\n');
 }
 
 /**

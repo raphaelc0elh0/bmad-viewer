@@ -237,17 +237,35 @@
 	}
 
 	function initKanbanBoard() {
-		var board = document.querySelector('.kanban');
-		if (!board || board.dataset.boardEditable !== 'true') return;
+		document.querySelectorAll('.kanban[data-board-editable="true"]').forEach(function (board) {
+			board.addEventListener('dragstart', handleBoardDragStart);
+			board.addEventListener('dragend', handleBoardDragEnd);
 
-		board.addEventListener('dragstart', handleBoardDragStart);
-		board.addEventListener('dragend', handleBoardDragEnd);
+			board.querySelectorAll('[data-dropzone="true"]').forEach(function (container) {
+				container.addEventListener('dragover', handleBoardDragOver);
+				container.addEventListener('dragenter', handleBoardDragEnter);
+				container.addEventListener('dragleave', handleBoardDragLeave);
+				container.addEventListener('drop', handleBoardDrop);
+			});
+		});
+	}
 
-		board.querySelectorAll('[data-dropzone="true"]').forEach(function (container) {
-			container.addEventListener('dragover', handleBoardDragOver);
-			container.addEventListener('dragenter', handleBoardDragEnter);
-			container.addEventListener('dragleave', handleBoardDragLeave);
-			container.addEventListener('drop', handleBoardDrop);
+	/* ── Feature board switch ── */
+	function initFeatureSwitch() {
+		var pills = document.querySelectorAll('.feature-switch__pill');
+		if (!pills.length) return;
+		pills.forEach(function (pill) {
+			pill.addEventListener('click', function () {
+				var target = pill.dataset.featureTarget;
+				pills.forEach(function (p) {
+					var on = p === pill;
+					p.classList.toggle('feature-switch__pill--active', on);
+					p.setAttribute('aria-selected', on ? 'true' : 'false');
+				});
+				document.querySelectorAll('.feature-board').forEach(function (section) {
+					section.hidden = section.dataset.feature !== target;
+				});
+			});
 		});
 	}
 
@@ -1193,6 +1211,7 @@
 
 		// Kanban board
 		initKanbanBoard();
+		initFeatureSwitch();
 
 		// WebSocket
 		initWebSocket();

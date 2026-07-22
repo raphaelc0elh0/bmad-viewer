@@ -291,86 +291,24 @@ function buildProjectData(outputPath, aggregator, options) {
 		stories: { total: 0, pending: 0, inProgress: 0, done: 0 },
 		storyList: [],
 		epics: [],
+		// One board per tracked feature (implementation-artifacts/<feature>/sprint-status.*),
+		// or a single unnamed board for the classic flat layout. See discoverSprintStatusFiles.
+		featureBoards: [],
 		artifacts: [],
 		bugs: [],
 		pendingItems: [],
 	};
 
-	// Parse sprint-status (yaml or md)
-	const sprintStatusPaths = [
-		join(outputPath, 'implementation-artifacts', 'sprint-status.yaml'),
-		join(outputPath, 'implementation-artifacts', 'sprint-status.md'),
-		join(outputPath, 'sprint-status.yaml'),
-		join(outputPath, 'sprint-status.md'),
-		join(outputPath, 'planning-artifacts', 'sprint-status.yaml'),
-		join(outputPath, 'planning-artifacts', 'sprint-status.md'),
-	];
-	if (options?.customSprintStatusPath) {
-		sprintStatusPaths.unshift(options.customSprintStatusPath);
+	// Discover sprint-status boards. A BMAD project can track several features in
+	// parallel — each implementation-artifacts/<feature>/sprint-status.yaml is its own
+	// board — alongside (or instead of) a single top-level board. Surface each as a
+	// feature board; the first becomes the primary for backward-compatible fields.
+	for (const { path: statusPath, feature } of discoverSprintStatusFiles(outputPath, options)) {
+		const board = buildBoardData(statusPath, feature, aggregator);
+		if (board) project.featureBoards.push(board);
 	}
-
-	for (const statusPath of sprintStatusPaths) {
-		if (existsSync(statusPath)) {
-			let raw = '';
-			try { raw = readFileSync(statusPath, 'utf8'); } catch { /* ignore */ }
-
-			// Try YAML format first (only report errors for .yaml files)
-			const result = parseYaml(statusPath);
-			const ext = extname(statusPath).toLowerCase();
-			if (ext === '.yaml' || ext === '.yml') {
-				aggregator.addResult(statusPath, result);
-			}
-
-			if (result.data?.development_status) {
-				const epicNames = parseEpicNamesFromComments(raw);
-				project.sprintStatus = result.data;
-				project.board = { editable: true, sprintStatusPath: statusPath, sprintStatusFormat: 'yaml' };
-				const status = result.data.development_status;
-				const epicMap = {};
-
-				for (const [key, value] of Object.entries(status)) {
-					if (key.endsWith('-retrospective')) continue;
-
-					// Epic entry
-					if (key.match(/^epic-\d+$/)) {
-						const epicNum = key.replace('epic-', '');
-						if (!epicMap[epicNum]) {
-							epicMap[epicNum] = { id: key, num: epicNum, name: epicNames[epicNum] || `Epic ${epicNum}`, status: value, stories: [] };
-						} else {
-							epicMap[epicNum].status = value;
-							epicMap[epicNum].name = epicNames[epicNum] || epicMap[epicNum].name;
-						}
-						continue;
-					}
-
-					// Story entry
-					project.stories.total++;
-					if (value === 'backlog' || value === 'ready-for-dev') project.stories.pending++;
-					else if (value === 'in-progress' || value === 'review') project.stories.inProgress++;
-					else if (value === 'done') project.stories.done++;
-
-					const parts = key.split('-');
-					const epicNum = parts[0];
-					const storyTitle = parts.slice(2).join(' ').replace(/\b\w/g, (c) => c.toUpperCase());
-					const story = { id: key, title: storyTitle || key, status: value, epic: epicNum };
-					project.storyList.push(story);
-
-					if (!epicMap[epicNum]) {
-						epicMap[epicNum] = { id: `epic-${epicNum}`, num: epicNum, name: epicNames[epicNum] || `Epic ${epicNum}`, status: 'in-progress', stories: [] };
-					}
-					epicMap[epicNum].stories.push(story);
-				}
-
-				project.epics = Object.values(epicMap).sort((a, b) => Number(a.num) - Number(b.num));
-				break;
-			}
-
-			// Fallback: try markdown table format (### Epic N: Name + | N.M | desc | status |)
-			if (raw && parseSprintStatusMarkdown(raw, project)) {
-				project.board = { editable: true, sprintStatusPath: statusPath, sprintStatusFormat: 'markdown' };
-				break;
-			}
-		}
+	if (project.featureBoards.length > 0) {
+		applyPrimaryBoard(project, project.featureBoards[0]);
 	}
 
 	// Scan planning artifacts (recursive to catch research/ subdir, and include .html files)
@@ -401,7 +339,11 @@ function buildProjectData(outputPath, aggregator, options) {
 				const storyContents = parseStoriesFromEpics(content.raw, aggregator);
 				project.storyContents = storyContents;
 
-				if (project.epics.length === 0) {
+				if (project.featureBoards.length > 0) {
+					// Per-feature sprint-status already owns the epic/story truth for this
+					// project; don't rebuild or merge from epics.md (it would double-count
+					// and blend one feature's epics into another's board).
+				} else if (project.epics.length === 0) {
 					// No sprint-status found — build epics entirely from markdown
 					project.epics = parseEpicsFromMarkdown(content.raw, storyContents);
 					for (const epic of project.epics) {
@@ -452,6 +394,20 @@ function buildProjectData(outputPath, aggregator, options) {
 	// Load custom epics file if provided and no epics were found from normal scan
 	if (project.epics.length === 0) {
 		loadCustomEpicsFile(customEpicsPath, project, aggregator);
+	}
+
+	// Classic flat layout (or epics.md-only projects): expose the single set of
+	// epics/stories as one unnamed board so the renderer always works off featureBoards.
+	if (project.featureBoards.length === 0 && (project.epics.length > 0 || project.stories.total > 0)) {
+		project.featureBoards.push({
+			key: 'sprint',
+			label: 'Sprint',
+			feature: null,
+			stories: project.stories,
+			storyList: project.storyList,
+			epics: project.epics,
+			board: project.board,
+		});
 	}
 
 	// Scan implementation artifact story files (direct .md files in impl dir + stories/ subdir)
@@ -801,6 +757,195 @@ function parseEpicNamesFromComments(rawYaml) {
 		names[match[1]] = match[2].trim();
 	}
 	return names;
+}
+
+// Terminal statuses that mean "no longer open work" but aren't literally "done".
+// Counted as done for progress and routed to the Done column so they don't inflate backlog.
+const TERMINAL_DONE_STATUSES = new Set(['done', 'superseded', 'cancelled', 'descoped']);
+
+/**
+ * Discover every sprint-status file to surface as a board.
+ *
+ * Returns the classic single-board locations (feature = null) plus one entry per
+ * implementation-artifacts/<feature>/ and planning-artifacts/<feature>/ that holds a
+ * sprint-status.{yaml,md}. Unnamed boards come first so the primary stays the flat-layout
+ * board when both exist; per-feature entries are sorted by name for stable output.
+ *
+ * @param {string} outputPath
+ * @param {{customSprintStatusPath?: string}} [options]
+ * @returns {Array<{path: string, feature: string|null}>}
+ */
+function discoverSprintStatusFiles(outputPath, options) {
+	const found = [];
+	const seen = new Set();
+	const add = (filePath, feature) => {
+		if (filePath && !seen.has(filePath) && existsSync(filePath)) {
+			seen.add(filePath);
+			found.push({ path: filePath, feature: feature || null });
+		}
+	};
+
+	// Explicit override wins and is treated as a single unnamed board.
+	if (options?.customSprintStatusPath) add(options.customSprintStatusPath, null);
+
+	// Classic single-board locations (unnamed).
+	add(join(outputPath, 'implementation-artifacts', 'sprint-status.yaml'), null);
+	add(join(outputPath, 'implementation-artifacts', 'sprint-status.md'), null);
+	add(join(outputPath, 'sprint-status.yaml'), null);
+	add(join(outputPath, 'sprint-status.md'), null);
+	add(join(outputPath, 'planning-artifacts', 'sprint-status.yaml'), null);
+	add(join(outputPath, 'planning-artifacts', 'sprint-status.md'), null);
+
+	// Per-feature nested boards: <impl|planning>/<feature>/sprint-status.{yaml,md}
+	for (const parent of ['implementation-artifacts', 'planning-artifacts']) {
+		const parentDir = join(outputPath, parent);
+		let entries = [];
+		try { entries = readdirSync(parentDir, { withFileTypes: true }); } catch { continue; }
+		for (const entry of entries.filter(e => e.isDirectory() && !e.name.startsWith('.')).sort((a, b) => a.name.localeCompare(b.name))) {
+			add(join(parentDir, entry.name, 'sprint-status.yaml'), entry.name);
+			add(join(parentDir, entry.name, 'sprint-status.md'), entry.name);
+		}
+	}
+
+	return found;
+}
+
+/**
+ * Build a single board object from one sprint-status file, or null if it holds no
+ * parseable development_status. Prefers strict YAML but falls back to a resilient
+ * line extractor, since real sprint-status files often carry multi-line prose or
+ * unquoted braces that break the YAML parser.
+ *
+ * @param {string} statusPath
+ * @param {string|null} feature
+ * @param {ErrorAggregator} aggregator
+ */
+function buildBoardData(statusPath, feature, aggregator) {
+	let raw = '';
+	try { raw = readFileSync(statusPath, 'utf8'); } catch { return null; }
+	const ext = extname(statusPath).toLowerCase();
+
+	if (ext === '.yaml' || ext === '.yml') {
+		const result = parseYaml(statusPath);
+		const status = result.data?.development_status;
+		if (status && typeof status === 'object') {
+			return boardFromStatusEntries(statusPath, feature, raw, status);
+		}
+		// Strict YAML failed or lacked the section — recover via the line extractor.
+		const salvaged = extractDevelopmentStatus(raw);
+		if (salvaged) return boardFromStatusEntries(statusPath, feature, raw, salvaged);
+		aggregator.addResult(statusPath, result);
+	}
+
+	// Markdown table format (### Epic N + | N.M | desc | status |).
+	if (raw) {
+		const md = { stories: { total: 0, pending: 0, inProgress: 0, done: 0 }, storyList: [], epics: [] };
+		if (parseSprintStatusMarkdown(raw, md)) {
+			return {
+				key: feature || 'sprint',
+				label: feature ? formatName(feature) : 'Sprint',
+				feature: feature || null,
+				stories: md.stories,
+				storyList: md.storyList,
+				epics: md.epics,
+				board: { editable: true, sprintStatusPath: statusPath, sprintStatusFormat: 'markdown' },
+			};
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Turn a development_status map ({ "epic-1": "done", "1-1-title": "done", ... }) into a
+ * board object with counted stories and epics. Mirrors the classic single-board logic.
+ */
+function boardFromStatusEntries(statusPath, feature, raw, status) {
+	const epicNames = parseEpicNamesFromComments(raw);
+	const stories = { total: 0, pending: 0, inProgress: 0, done: 0 };
+	const storyList = [];
+	const epicMap = {};
+
+	for (const [key, value] of Object.entries(status)) {
+		if (typeof value !== 'string') continue;
+		if (key.endsWith('-retrospective')) continue;
+
+		if (/^epic-\d+$/.test(key)) {
+			const epicNum = key.replace('epic-', '');
+			if (!epicMap[epicNum]) {
+				epicMap[epicNum] = { id: key, num: epicNum, name: epicNames[epicNum] || `Epic ${epicNum}`, status: value, stories: [] };
+			} else {
+				epicMap[epicNum].status = value;
+				epicMap[epicNum].name = epicNames[epicNum] || epicMap[epicNum].name;
+			}
+			continue;
+		}
+
+		stories.total++;
+		if (value === 'backlog' || value === 'ready-for-dev') stories.pending++;
+		else if (value === 'in-progress' || value === 'review') stories.inProgress++;
+		else if (TERMINAL_DONE_STATUSES.has(value)) stories.done++;
+
+		const parts = key.split('-');
+		const epicNum = parts[0];
+		const storyTitle = parts.slice(2).join(' ').replace(/\b\w/g, (c) => c.toUpperCase());
+		const story = { id: key, title: storyTitle || key, status: value, epic: epicNum };
+		storyList.push(story);
+
+		if (!epicMap[epicNum]) {
+			epicMap[epicNum] = { id: `epic-${epicNum}`, num: epicNum, name: epicNames[epicNum] || `Epic ${epicNum}`, status: 'in-progress', stories: [] };
+		}
+		epicMap[epicNum].stories.push(story);
+	}
+
+	const epics = Object.values(epicMap).sort((a, b) => Number(a.num) - Number(b.num));
+	return {
+		key: feature || 'sprint',
+		label: feature ? formatName(feature) : 'Sprint',
+		feature: feature || null,
+		sprintStatus: { development_status: status },
+		stories,
+		storyList,
+		epics,
+		board: { editable: true, sprintStatusPath: statusPath, sprintStatusFormat: 'yaml' },
+	};
+}
+
+/**
+ * Extract the development_status map from raw sprint-status text without a full YAML
+ * parse. Real files frequently wrap prose across comment lines or use unquoted `{...}`
+ * elsewhere in the doc, which breaks js-yaml — but the block itself is a flat list of
+ * `  key: value  # optional comment` lines. Returns null if nothing usable is found.
+ *
+ * @param {string} raw
+ * @returns {Record<string, string>|null}
+ */
+export function extractDevelopmentStatus(raw) {
+	const status = {};
+	let inBlock = false;
+	for (const line of raw.split(/\r?\n/)) {
+		if (!inBlock) {
+			if (/^development_status\s*:\s*(#.*)?$/.test(line)) inBlock = true;
+			continue;
+		}
+		// A new top-level mapping key ends the block; stray wrapped prose does not.
+		if (/^[A-Za-z0-9_][\w.-]*\s*:/.test(line)) break;
+		const entry = line.match(/^\s+([A-Za-z0-9._-]+)\s*:\s*([A-Za-z0-9._-]+)\s*(?:#.*)?$/);
+		if (entry) status[entry[1]] = entry[2];
+	}
+	return Object.keys(status).length > 0 ? status : null;
+}
+
+/**
+ * Copy a feature board's data onto the legacy top-level project fields so existing
+ * single-board consumers (save endpoint, content map fallback) keep working.
+ */
+function applyPrimaryBoard(project, board) {
+	project.sprintStatus = board.sprintStatus || null;
+	project.board = board.board;
+	project.stories = board.stories;
+	project.storyList = board.storyList;
+	project.epics = board.epics;
 }
 
 /**
