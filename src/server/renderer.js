@@ -18,7 +18,8 @@ export function renderDashboard(dataModel) {
 		modules: wiki.modules,
 		artifacts: project.artifacts,
 		epics: project.epics,
-		featureBoards: project.featureBoards,
+		sprints: project.sprints,
+		activeSprintId: project.activeSprintId,
 		artifactGroups: project.artifactGroups,
 	});
 
@@ -39,13 +40,13 @@ export function renderDashboard(dataModel) {
 	</main>
 </div>`;
 
-	// Build project view. A project may track several features in parallel — render one
-	// board section per feature and a switch to move between them. Classic single-board
-	// projects render exactly one section (no switch, drag-and-drop preserved).
-	const featureBoards = (project.featureBoards && project.featureBoards.length > 0)
-		? project.featureBoards
-		: [{ key: 'sprint', label: 'Sprint', feature: null, stories: project.stories, storyList: project.storyList || [], epics: project.epics, board: project.board }];
-	const multiFeature = featureBoards.length > 1;
+	// Build project view. Each initiative is a "sprint" (sprint-status-backed or spec-driven);
+	// the client shows the one named by #project?sprint=<id> (default: the active sprint).
+	const sprints = (project.sprints && project.sprints.length > 0)
+		? project.sprints
+		: [{ id: 'sprint', label: 'Sprint', source: 'sprint-status', active: true, stories: project.stories, storyList: project.storyList || [], epics: project.epics, board: project.board }];
+	const activeSprintId = project.activeSprintId || sprints[0]?.id || null;
+	const singleSprint = sprints.length === 1;
 
 	const noData = project.epics.length === 0 && project.stories.total === 0;
 	const configPanel = `<div class="path-config-panel${noData ? '' : ' path-config-panel--collapsed'}" id="path-config-panel">
@@ -90,31 +91,22 @@ export function renderDashboard(dataModel) {
 		})),
 	};
 
-	const boardSections = featureBoards
-		.map((fb, i) => renderFeatureBoardSection(fb, {
-			globals: i === 0 ? globals : null,
-			// Drag-and-drop persists to a single sprint-status file, so only enable it for
-			// a lone editable board. Per-feature boards render read-only for now.
-			editable: !multiFeature && !!fb.board?.editable,
-			active: i === 0,
-			multiFeature,
+	const boardSections = sprints
+		.map((sprint) => renderSprintBoardSection(sprint, {
+			// Global bugs/pending items ride along on the active sprint's board only.
+			globals: sprint.id === activeSprintId ? globals : null,
+			// Drag-and-drop persists to a single sprint-status file, so only a lone
+			// sprint-status board is editable; multi-sprint and spec boards are read-only.
+			editable: singleSprint && sprint.source === 'sprint-status' && !!sprint.board?.editable,
+			visible: sprint.id === activeSprintId,
+			singleSprint,
 		}))
 		.join('\n');
 
-	const featureSwitch = multiFeature
-		? `<div class="feature-switch" role="tablist" aria-label="Feature boards">
-		${featureBoards.map((fb, i) => `<button class="feature-switch__pill${i === 0 ? ' feature-switch__pill--active' : ''}" role="tab" aria-selected="${i === 0 ? 'true' : 'false'}" data-feature-target="${escapeHtml(fb.key)}">
-			<span class="feature-switch__name">${escapeHtml(fb.label)}</span>
-			<span class="feature-switch__count">${fb.stories.done}/${fb.stories.total}</span>
-		</button>`).join('\n')}
-	</div>`
-		: '';
-
 	const projectContent = `<div id="project-view" hidden>
-	<div id="project-dashboard">
+	<div id="project-dashboard" data-active-sprint="${escapeHtml(activeSprintId || '')}">
 		${configPanel}
 		${renderIntegrationsLauncher()}
-		${featureSwitch}
 		${boardSections}
 	</div>
 	${renderIntegrationsModal()}
@@ -124,7 +116,16 @@ export function renderDashboard(dataModel) {
 	</main>
 </div>`;
 
-	const content = wikiContent + projectContent;
+	// Sprints gallery — one card per initiative, linking into its board.
+	const sprintsContent = `<div id="sprints-view" hidden>
+	<div class="sprints-gallery__header">
+		<h1>Sprints</h1>
+		<p class="sprints-gallery__subtitle">Every initiative tracked in <code>implementation-artifacts/</code>. Open one to see its board.</p>
+	</div>
+	${renderSprintsGallery(sprints, activeSprintId)}
+</div>`;
+
+	const content = wikiContent + projectContent + sprintsContent;
 
 	// Gather warnings
 	const summary = aggregator.getSummary();
@@ -135,6 +136,7 @@ export function renderDashboard(dataModel) {
 		sidebar,
 		content,
 		activeTab: 'wiki',
+		activeSprintId,
 		warnings,
 		contentMapJson: JSON.stringify(contentMap),
 		projectName: config.project_name,
@@ -145,14 +147,15 @@ export function renderDashboard(dataModel) {
 const DONE_STATES = new Set(['done', 'superseded', 'cancelled', 'descoped']);
 
 /**
- * Render one feature's dashboard section: stats, progress, and a kanban board.
- * Global bug/pending cards ride along on the first section only (via `globals`).
+ * Render one sprint's dashboard section: header, stats, progress, and a kanban board.
+ * All sections are rendered; the client reveals the one named by #project?sprint=<id>.
+ * Global bug/pending cards ride along on the active sprint's section only (via `globals`).
  *
- * @param {object} fb - A feature board { key, label, stories, storyList, epics, board }
- * @param {{globals: object|null, editable: boolean, active: boolean, multiFeature: boolean}} opts
+ * @param {object} sprint - { id, label, source, active, stories, storyList, epics, board }
+ * @param {{globals: object|null, editable: boolean, visible: boolean, singleSprint: boolean}} opts
  */
-function renderFeatureBoardSection(fb, { globals, editable, active, multiFeature }) {
-	const storyList = fb.storyList || [];
+function renderSprintBoardSection(sprint, { globals, editable, visible, singleSprint }) {
+	const storyList = sprint.storyList || [];
 	const inState = (state) => storyList.filter((s) => s.status === state);
 	const bugs = globals?.bugs || [];
 	const columns = [
@@ -163,18 +166,66 @@ function renderFeatureBoardSection(fb, { globals, editable, active, multiFeature
 		{ key: 'done', title: 'Done', stories: [...storyList.filter((s) => DONE_STATES.has(s.status)), ...bugs.filter((c) => DONE_STATES.has(c.status)), ...(globals?.pendingDone || [])] },
 	];
 
+	const readOnlyHint = sprint.source === 'specs'
+		? ' Spec-driven sprint — status comes from each <code>spec-*.md</code> frontmatter.'
+		: (singleSprint ? ' Add a writable <code>sprint-status</code> file to enable drag and drop updates.' : ' Drag-and-drop is disabled while several sprints are tracked.');
 	const message = editable
 		? '<div class="kanban-toolbar"><p class="kanban-toolbar__hint">Drag story cards between BMAD states. The viewer saves <code>sprint-status</code> locally and syncs connected platforms when available.</p><span class="kanban-toolbar__status" id="board-save-status" aria-live="polite"></span></div>'
-		: `<div class="kanban-toolbar"><p class="kanban-toolbar__hint">Read-only board.${multiFeature ? ' Drag-and-drop is disabled while several feature boards are tracked.' : ' Add a writable <code>sprint-status</code> file to enable drag and drop updates.'}</p></div>`;
+		: `<div class="kanban-toolbar"><p class="kanban-toolbar__hint">Read-only board.${readOnlyHint}</p></div>`;
 
-	return `<section class="feature-board" data-feature="${escapeHtml(fb.key)}"${active ? '' : ' hidden'}>
-		${StatsBox({ total: fb.stories.total, pending: fb.stories.pending, inProgress: fb.stories.inProgress, done: fb.stories.done, inProgressLabel: 'Active' })}
-		${ProgressBar({ completed: fb.stories.done, total: fb.stories.total })}
+	return `<section class="sprint-board" data-sprint="${escapeHtml(sprint.id)}"${visible ? '' : ' hidden'}>
+		${renderSprintHeader(sprint)}
+		${StatsBox({ total: sprint.stories.total, pending: sprint.stories.pending, inProgress: sprint.stories.inProgress, done: sprint.stories.done, inProgressLabel: 'Active' })}
+		${ProgressBar({ completed: sprint.stories.done, total: sprint.stories.total })}
 		${message}
 		<div class="kanban" data-board-editable="${editable ? 'true' : 'false'}">
 			${columns.map((column) => KanbanColumn({ title: column.title, stories: column.stories, columnId: column.key, editable })).join('\n')}
 		</div>
 	</section>`;
+}
+
+/**
+ * Header shown atop a sprint board: name, active/source badges.
+ */
+function renderSprintHeader(sprint) {
+	const badges = [];
+	if (sprint.active) badges.push('<span class="sprint-badge sprint-badge--active">Active sprint</span>');
+	badges.push(`<span class="sprint-badge sprint-badge--source">${sprint.source === 'specs' ? 'spec-driven' : 'sprint-status'}</span>`);
+	return `<div class="sprint-board__header">
+		<h2 class="sprint-board__title">${escapeHtml(sprint.label)}</h2>
+		<div class="sprint-board__badges">${badges.join('')}</div>
+	</div>`;
+}
+
+/**
+ * Render the sprints gallery — one card per initiative linking into its board.
+ */
+function renderSprintsGallery(sprints, activeSprintId) {
+	if (sprints.length === 0) {
+		return '<p class="sprints-gallery__empty">No sprints found under implementation-artifacts/.</p>';
+	}
+	const cards = sprints.map((sprint) => {
+		const pct = sprint.stories.total > 0 ? Math.round((sprint.stories.done / sprint.stories.total) * 100) : 0;
+		const isActive = sprint.id === activeSprintId;
+		return `<a class="sprint-card${isActive ? ' sprint-card--active' : ''}" href="#project?sprint=${encodeURIComponent(sprint.id)}">
+		<div class="sprint-card__head">
+			<h3 class="sprint-card__title">${escapeHtml(sprint.label)}</h3>
+			${isActive ? '<span class="sprint-badge sprint-badge--active">Active</span>' : ''}
+		</div>
+		<div class="sprint-card__meta">
+			<span class="sprint-badge sprint-badge--source">${sprint.source === 'specs' ? 'spec-driven' : 'sprint-status'}</span>
+			<span class="sprint-card__count">${sprint.stories.done}/${sprint.stories.total} done</span>
+		</div>
+		${ProgressBar({ completed: sprint.stories.done, total: sprint.stories.total })}
+		<div class="sprint-card__pills">
+			<span class="sprint-card__pill sprint-card__pill--done">${sprint.stories.done} done</span>
+			<span class="sprint-card__pill sprint-card__pill--active">${sprint.stories.inProgress} active</span>
+			<span class="sprint-card__pill sprint-card__pill--pending">${sprint.stories.pending} pending</span>
+			<span class="sprint-card__pct">${pct}%</span>
+		</div>
+	</a>`;
+	}).join('\n');
+	return `<div class="sprints-gallery">${cards}</div>`;
 }
 
 function renderIntegrationsLauncher() {
@@ -333,23 +384,27 @@ function buildContentMap(wiki, project) {
 		};
 	}
 
-	// Stories from sprint status + epics.md content, across every feature board.
+	// Stories across every sprint (sprint-status boards and spec-driven boards).
 	const storyContents = project.storyContents || {};
-	const boardsForContent = (project.featureBoards && project.featureBoards.length > 0)
-		? project.featureBoards
+	const sprintsForContent = (project.sprints && project.sprints.length > 0)
+		? project.sprints
 		: [{ epics: project.epics }];
-	const allEpics = boardsForContent.flatMap((fb) => fb.epics || []);
-	for (const epic of allEpics) {
-		for (const story of epic.stories) {
-			const key = `story/${story.id}`;
-			if (!map[key]) {
-				// Try to find content from epics.md parsing (key format: "epicNum-storyNum")
-				const parts = story.id.split('-');
-				const storyKey = `${parts[0]}-${parts[1]}`;
-				const epicContent = storyContents[storyKey];
-				const statusLabel = (story.status || 'backlog').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-				const statusBadge = `<p><strong>Epic ${escapeHtml(epic.num)}:</strong> ${escapeHtml(epic.name)} &nbsp; <span class="badge badge--${escapeHtml(story.status)}">${escapeHtml(statusLabel)}</span></p>`;
+	for (const sprint of sprintsForContent) {
+		for (const epic of sprint.epics || []) {
+			for (const story of epic.stories) {
+				const key = `story/${story.id}`;
+				if (map[key]) continue;
+				const statusLabel = (story.status || 'backlog').replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+				const statusBadge = `<p><strong>${escapeHtml(String(epic.name))}:</strong> &nbsp; <span class="badge badge--${escapeHtml(story.status)}">${escapeHtml(statusLabel)}</span></p>`;
 
+				// Spec-driven stories carry their own rendered markdown body.
+				if (story.html) {
+					map[key] = { html: statusBadge + story.html, name: story.title, type: 'story' };
+					continue;
+				}
+				// Otherwise fall back to epics.md content keyed by "epicNum-storyNum".
+				const parts = String(story.id).split('-');
+				const epicContent = storyContents[`${parts[0]}-${parts[1]}`];
 				map[key] = {
 					html: epicContent
 						? statusBadge + epicContent.html

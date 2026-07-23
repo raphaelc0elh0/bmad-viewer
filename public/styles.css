@@ -274,3 +274,37 @@ mark.search-highlight{background:rgba(245,158,11,.4);color:var(--text);border-ra
 /* Per-feature epic groups in the sidebar */
 .sidebar-nav__feature-group{list-style:none;margin:0 0 10px}
 .sidebar-nav__feature-heading{display:flex;align-items:center;gap:6px;margin:8px 0 4px;padding:0 8px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
+
+/* ── Sprint board header + badges ── */
+.sprint-board__header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:4px 0 16px}
+.sprint-board__title{font-size:1.4rem;font-weight:700;margin:0}
+.sprint-board__badges{display:flex;gap:6px;flex-wrap:wrap}
+.sprint-badge{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:2px 9px;border-radius:999px;border:1px solid var(--border);color:var(--text-muted);background:var(--badge-bg)}
+.sprint-badge--active{color:var(--primary);border-color:var(--primary);background:var(--accent-soft)}
+.sprint-badge--source{font-weight:600;text-transform:none;letter-spacing:0}
+
+/* ── Sprints gallery ── */
+.sprints-gallery__header{margin:8px 0 20px}
+.sprints-gallery__header h1{font-size:1.6rem;font-weight:700;margin:0 0 4px}
+.sprints-gallery__subtitle{color:var(--text-muted);font-size:.9rem;margin:0}
+.sprints-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.sprints-gallery__empty{color:var(--text-muted)}
+.sprint-card{display:flex;flex-direction:column;gap:10px;padding:16px;background:var(--card-bg);border:1px solid var(--border);border-radius:10px;text-decoration:none;color:var(--text);box-shadow:var(--card-shadow);transition:border-color .15s,transform .15s}
+.sprint-card:hover{border-color:var(--primary);transform:translateY(-2px)}
+.sprint-card--active{border-color:var(--primary)}
+.sprint-card__head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sprint-card__title{font-size:1.05rem;font-weight:700;margin:0}
+.sprint-card__meta{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sprint-card__count{font-size:.8rem;color:var(--text-muted)}
+.sprint-card__pills{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:.72rem}
+.sprint-card__pill{padding:1px 8px;border-radius:999px;background:var(--badge-bg);color:var(--text-muted)}
+.sprint-card__pill--done{color:var(--success)}
+.sprint-card__pill--active{color:var(--progress)}
+.sprint-card__pill--pending{color:var(--warning)}
+.sprint-card__pct{margin-left:auto;font-weight:700;color:var(--text)}
+.sprint-board[hidden]{display:none}
+
+/* ── Sidebar per-sprint epic groups ── */
+.sidebar-nav__feature-link{color:inherit;text-decoration:none}
+.sidebar-nav__feature-link:hover{color:var(--primary)}
+.sidebar-nav__feature-heading--active .sidebar-nav__feature-link{color:var(--primary)}

@@ -8,32 +8,46 @@
 	var pendingHighlight = null;
 	var boardDragState = null;
 	var boardSaveInFlight = false;
+	var currentSprintId = null;
 
 	/* ── Hash Router ── */
 	function parseHash() {
 		var cleaned = (location.hash || '').replace(/^#\/?/, '');
+		// Split off a query string (e.g. project?sprint=admin-redesign).
+		var query = {};
+		var qIdx = cleaned.indexOf('?');
+		if (qIdx !== -1) {
+			cleaned.substring(qIdx + 1).split('&').forEach(function (pair) {
+				if (!pair) return;
+				var kv = pair.split('=');
+				query[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1] || '');
+			});
+			cleaned = cleaned.substring(0, qIdx);
+		}
 		var slashIdx = cleaned.indexOf('/');
 		if (slashIdx === -1) {
-			return { view: cleaned || 'wiki', id: null };
+			return { view: cleaned || 'wiki', id: null, query: query };
 		}
-		return { view: cleaned.substring(0, slashIdx), id: cleaned.substring(slashIdx + 1) };
+		return { view: cleaned.substring(0, slashIdx), id: cleaned.substring(slashIdx + 1), query: query };
 	}
 
 	function onHashChange() {
 		var route = parseHash();
 		var wikiView = document.getElementById('wiki-view');
 		var projectView = document.getElementById('project-view');
+		var sprintsView = document.getElementById('sprints-view');
 		var tabs = document.querySelectorAll('.lens-tabs__tab');
 
-		// Switch views
+		// Switch views (project and sprints share the "project"/"sprints" lenses)
 		if (wikiView) wikiView.hidden = route.view !== 'wiki';
 		if (projectView) projectView.hidden = route.view !== 'project';
+		if (sprintsView) sprintsView.hidden = route.view !== 'sprints';
 
-		// Switch sidebar lens
+		// Switch sidebar lens (the project lens serves both the board and the gallery)
 		var sidebarWiki = document.getElementById('sidebar-wiki');
 		var sidebarProject = document.getElementById('sidebar-project');
 		if (sidebarWiki) sidebarWiki.hidden = route.view !== 'wiki';
-		if (sidebarProject) sidebarProject.hidden = route.view !== 'project';
+		if (sidebarProject) sidebarProject.hidden = route.view === 'wiki';
 
 		// Update tabs
 		tabs.forEach(function (tab) {
@@ -42,23 +56,40 @@
 			tab.setAttribute('aria-selected', String(isActive));
 		});
 
-		// Load content if an id is specified
-		if (route.id) {
-			if (route.view === 'wiki') {
-				loadWikiContent(route.id);
-			} else if (route.view === 'project') {
-				loadProjectContent(route.id);
-			}
-		} else if (route.view === 'wiki') {
-			// Show welcome page when no specific item is selected
-			showWikiWelcome();
+		// Load content
+		if (route.view === 'wiki') {
+			if (route.id) loadWikiContent(route.id); else showWikiWelcome();
 		} else if (route.view === 'project') {
-			// Show dashboard when no specific artifact is selected
-			showProjectDashboard();
+			// #project/story/<id> shows a story; #project?sprint=<id> shows that sprint's board.
+			if (route.id && route.id.indexOf('story/') === 0) {
+				loadProjectContent(route.id);
+			} else {
+				showSprint(route.query.sprint || null);
+			}
 		}
 
 		// Update active link highlight in sidebar
 		updateActiveLink(route);
+	}
+
+	// Reveal one sprint's board section (default: the server-marked active sprint).
+	function showSprint(sprintId) {
+		var dashboard = document.getElementById('project-dashboard');
+		if (!dashboard) return;
+		var target = sprintId || dashboard.dataset.activeSprint || null;
+		var sections = dashboard.querySelectorAll('.sprint-board');
+		var matched = false;
+		sections.forEach(function (section) {
+			var show = section.dataset.sprint === target;
+			section.hidden = !show;
+			if (show) matched = true;
+		});
+		// If the requested sprint doesn't exist, fall back to the first section.
+		if (!matched && sections.length > 0) {
+			sections.forEach(function (s, i) { s.hidden = i !== 0; });
+		}
+		currentSprintId = target;
+		showProjectDashboard();
 	}
 
 	function loadWikiContent(id) {
@@ -1146,10 +1177,10 @@
 		onHashChange();
 		window.addEventListener('hashchange', onHashChange);
 
-		// Tabs
+		// Tabs — each carries its full target hash (the Active Sprint tab deep-links ?sprint=<id>)
 		document.querySelectorAll('.lens-tabs__tab').forEach(function (tab) {
 			tab.addEventListener('click', function () {
-				location.hash = '#' + this.dataset.tab;
+				location.hash = this.dataset.target || ('#' + this.dataset.tab);
 			});
 		});
 

@@ -294,6 +294,11 @@ function buildProjectData(outputPath, aggregator, options) {
 		// One board per tracked feature (implementation-artifacts/<feature>/sprint-status.*),
 		// or a single unnamed board for the classic flat layout. See discoverSprintStatusFiles.
 		featureBoards: [],
+		// One entry per initiative/sprint: sprint-status-backed boards AND spec-driven ones
+		// (implementation-artifacts/<init>/spec-*.md). See buildSprints. activeSprintId is the
+		// initiative the BMAD config currently points its workflows at.
+		sprints: [],
+		activeSprintId: null,
 		artifacts: [],
 		bugs: [],
 		pendingItems: [],
@@ -521,7 +526,69 @@ function buildProjectData(outputPath, aggregator, options) {
 		project.artifactGroups[cat].push(art);
 	}
 
+	// Unify every initiative into a single sprints list: sprint-status-backed boards plus
+	// spec-driven initiatives (implementation-artifacts/<init>/spec-*.md). The active one is
+	// whatever the BMAD config currently points its workflows at.
+	buildSprints(project, outputPath, aggregator);
+
 	return project;
+}
+
+/**
+ * Populate project.sprints (and project.activeSprintId) from both board sources.
+ * A "sprint" is one initiative folder under implementation-artifacts/.
+ */
+function buildSprints(project, outputPath, aggregator) {
+	const activeId = readActiveSprintId(outputPath);
+
+	// Sprint-status-backed initiatives come straight from featureBoards.
+	const sprints = project.featureBoards.map((fb) => ({
+		id: fb.feature || fb.key,
+		label: fb.label,
+		source: 'sprint-status',
+		stories: fb.stories,
+		storyList: fb.storyList,
+		epics: fb.epics,
+		board: fb.board,
+	}));
+	const covered = new Set(sprints.map((s) => s.id));
+
+	// Spec-driven initiatives (no sprint-status.yaml, tracked by spec-*.md frontmatter).
+	for (const sprint of buildSpecDrivenSprints(outputPath, covered, aggregator)) {
+		sprints.push(sprint);
+	}
+
+	// Active first, then alphabetical — keeps the initiative in progress at the front.
+	sprints.sort((a, b) => {
+		if (a.id === activeId) return -1;
+		if (b.id === activeId) return 1;
+		return a.label.localeCompare(b.label);
+	});
+	for (const sprint of sprints) sprint.active = sprint.id === activeId;
+
+	project.sprints = sprints;
+	project.activeSprintId = activeId && sprints.some((s) => s.id === activeId)
+		? activeId
+		: (sprints[0]?.id ?? null);
+}
+
+/**
+ * Read the active initiative slug from the BMAD config. Workflows read
+ * `implementation_artifacts`, which points at the current initiative's subfolder; its last
+ * path segment is the initiative id (matching the implementation-artifacts/<id> folder).
+ *
+ * @param {string} outputPath
+ * @returns {string|null}
+ */
+function readActiveSprintId(outputPath) {
+	const configPath = join(outputPath, '..', '_bmad', 'bmm', 'config.yaml');
+	if (!existsSync(configPath)) return null;
+	const result = parseYaml(configPath);
+	const implPath = result.data?.implementation_artifacts;
+	if (typeof implPath !== 'string') return null;
+	const slug = implPath.replace(/[/\\]+$/, '').split(/[/\\]/).pop();
+	// Only treat it as an initiative when it's nested under implementation-artifacts/.
+	return slug && slug !== 'implementation-artifacts' ? slug : null;
 }
 
 /**
@@ -714,6 +781,116 @@ function parseSprintStatusMarkdown(raw, project) {
 	}
 
 	return project.stories.total > 0;
+}
+
+// Map spec-*.md frontmatter status values onto the kanban's standard states.
+const SPEC_STATUS_MAP = {
+	done: 'done',
+	'in-review': 'review', review: 'review', reviewing: 'review',
+	'in-progress': 'in-progress', wip: 'in-progress', doing: 'in-progress',
+	approved: 'ready-for-dev', ready: 'ready-for-dev', 'ready-for-dev': 'ready-for-dev',
+	todo: 'backlog', draft: 'backlog', drafting: 'backlog', planned: 'backlog', backlog: 'backlog', new: 'backlog',
+};
+
+function mapSpecStatus(rawStatus) {
+	return SPEC_STATUS_MAP[String(rawStatus || '').toLowerCase().trim()] || 'backlog';
+}
+
+/**
+ * Build spec-driven sprints for initiative folders that carry spec-*.md files but no
+ * sprint-status.yaml (already-covered initiatives are skipped).
+ *
+ * @param {string} outputPath
+ * @param {Set<string>} covered - initiative ids already represented by a sprint-status board
+ * @param {ErrorAggregator} aggregator
+ * @returns {Array<object>}
+ */
+function buildSpecDrivenSprints(outputPath, covered, aggregator) {
+	const implDir = join(outputPath, 'implementation-artifacts');
+	let entries = [];
+	try { entries = readdirSync(implDir, { withFileTypes: true }); } catch { return []; }
+
+	const sprints = [];
+	for (const entry of entries) {
+		if (!entry.isDirectory() || entry.name.startsWith('.') || covered.has(entry.name)) continue;
+		const dir = join(implDir, entry.name);
+		const specFiles = scanDirectMarkdownFiles(dir).filter((f) => basename(f).startsWith('spec-'));
+		if (specFiles.length === 0) continue;
+		sprints.push(buildSpecSprint(entry.name, specFiles, aggregator));
+	}
+	return sprints;
+}
+
+/**
+ * Build one sprint from an initiative's spec-*.md files, grouping by wave ("Onda") and
+ * mapping each spec's frontmatter status to a kanban column. Each spec keeps its rendered
+ * body so its card opens the full document.
+ */
+function buildSpecSprint(id, specFiles, aggregator) {
+	const stories = { total: 0, pending: 0, inProgress: 0, done: 0 };
+	const storyList = [];
+	const epicMap = {};
+
+	for (const file of specFiles.sort()) {
+		const base = basename(file, '.md');
+		const content = readMarkdownSafe(file, aggregator);
+		const fm = content.frontmatter || {};
+		const status = mapSpecStatus(fm.status);
+		const { epicNum, epicName } = parseSpecName(base, fm.title);
+		const title = (fm.title ? String(fm.title) : formatName(base.replace(/^spec-/, ''))).trim();
+
+		const story = { id: `spec/${id}/${base}`, title, status, epic: epicNum, html: content.html, path: file };
+		storyList.push(story);
+		stories.total++;
+		if (status === 'backlog' || status === 'ready-for-dev') stories.pending++;
+		else if (status === 'in-progress' || status === 'review') stories.inProgress++;
+		else if (status === 'done') stories.done++;
+
+		if (!epicMap[epicNum]) {
+			epicMap[epicNum] = { id: `epic-${epicNum}`, num: epicNum, name: epicName, status: 'in-progress', stories: [] };
+		}
+		epicMap[epicNum].stories.push(story);
+	}
+
+	// Numeric waves ascending, non-numeric ("Extras") last.
+	const epics = Object.values(epicMap).sort((a, b) => {
+		const na = Number(a.num), nb = Number(b.num);
+		if (Number.isNaN(na) && Number.isNaN(nb)) return String(a.num).localeCompare(String(b.num));
+		if (Number.isNaN(na)) return 1;
+		if (Number.isNaN(nb)) return -1;
+		return na - nb;
+	});
+	for (const epic of epics) epic.status = deriveEpicStatusFromStories(epic.stories);
+
+	return {
+		id,
+		label: formatName(id),
+		source: 'specs',
+		stories,
+		storyList,
+		epics,
+		board: { editable: false, sprintStatusPath: null, sprintStatusFormat: 'specs' },
+	};
+}
+
+/**
+ * Derive the wave/epic grouping for a spec file.
+ * `spec-1-2-employees` → wave 1 ("Onda 1"); `spec-storybook-…` (no leading number) → "Extras".
+ * When the frontmatter title carries an explicit "Onda N", it names the wave.
+ *
+ * @param {string} base - spec file basename without extension
+ * @param {string} [title]
+ * @returns {{epicNum: string, epicName: string}}
+ */
+function parseSpecName(base, title) {
+	const rest = base.replace(/^spec-/, '');
+	const numeric = rest.match(/^(\d+)\b/);
+	if (numeric) {
+		const wave = numeric[1];
+		const ondaFromTitle = title && String(title).match(/Onda\s+(\d+)/i);
+		return { epicNum: wave, epicName: ondaFromTitle ? `Onda ${ondaFromTitle[1]}` : `Onda ${wave}` };
+	}
+	return { epicNum: 'extras', epicName: 'Extras' };
 }
 
 function deriveEpicStatusFromStories(stories) {

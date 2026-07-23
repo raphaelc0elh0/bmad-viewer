@@ -19,7 +19,7 @@ const CATEGORY_ORDER = [
  * @param {{modules: Array, artifacts: Array, epics: Array, artifactGroups: object}} props
  * @returns {string} HTML string
  */
-export function SidebarNav({ modules, artifacts, epics, featureBoards, artifactGroups }) {
+export function SidebarNav({ modules, artifacts, epics, sprints, activeSprintId, artifactGroups }) {
 	// Wiki sidebar content
 	const modulesList = (modules || [])
 		.map(
@@ -57,14 +57,17 @@ export function SidebarNav({ modules, artifacts, epics, featureBoards, artifactG
 		)
 		.join('\n');
 
-	// Project sidebar: Sprint Dashboard link + Epics with stories + Categorized Artifacts.
-	// With several feature boards, group the epics under each feature so the tree mirrors
-	// the parallel work; a single board keeps the flat Epics list.
-	const boards = (featureBoards || []).filter((b) => (b.epics || []).length > 0);
+	// Project sidebar: Sprints link + per-sprint epics with stories + categorized artifacts.
+	// With several sprints, group the epics under each initiative so the tree mirrors the
+	// parallel work (active sprint first); a single sprint keeps the flat Epics list.
+	const boards = (sprints || []).filter((s) => (s.epics || []).length > 0);
 	const epicsList = boards.length > 1
 		? boards.map((board) => `
 		<li class="sidebar-nav__feature-group">
-			<h3 class="sidebar-nav__feature-heading">${escapeHtml(board.label)} <span class="sidebar-nav__count">${board.stories.done}/${board.stories.total}</span></h3>
+			<h3 class="sidebar-nav__feature-heading${board.id === activeSprintId ? ' sidebar-nav__feature-heading--active' : ''}">
+				<a href="#project?sprint=${encodeURIComponent(board.id)}" class="sidebar-nav__feature-link">${escapeHtml(board.label)}</a>
+				<span class="sidebar-nav__count">${board.stories.done}/${board.stories.total}</span>
+			</h3>
 			<ul class="sidebar-nav__list">${renderEpicItems(board.epics)}</ul>
 		</li>`).join('\n')
 		: renderEpicItems(epics || []);
@@ -109,8 +112,8 @@ export function SidebarNav({ modules, artifacts, epics, featureBoards, artifactG
 		</ul>
 	</div>
 	<div id="sidebar-project" class="sidebar-nav__lens" hidden>
-		<a href="#project" class="sidebar-nav__dashboard-link">
-			<span>&#128202;</span> Sprint Dashboard
+		<a href="#sprints" class="sidebar-nav__dashboard-link">
+			<span>&#128202;</span> All sprints
 		</a>
 		${epicsList ? `<h2 class="sidebar-nav__heading">Epics</h2>
 		<ul class="sidebar-nav__list">${epicsList}</ul>` : ''}
