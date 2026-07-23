@@ -43,11 +43,17 @@
 		if (projectView) projectView.hidden = route.view !== 'project';
 		if (sprintsView) sprintsView.hidden = route.view !== 'sprints';
 
-		// Switch sidebar lens (the project lens serves both the board and the gallery)
+		// Switch sidebar lens. The gallery ("sprints") needs no sidebar at all — hide the
+		// whole aside so the cards use the full width.
 		var sidebarWiki = document.getElementById('sidebar-wiki');
 		var sidebarProject = document.getElementById('sidebar-project');
+		var aside = document.querySelector('.app-layout__sidebar');
+		var layout = document.querySelector('.app-layout');
 		if (sidebarWiki) sidebarWiki.hidden = route.view !== 'wiki';
-		if (sidebarProject) sidebarProject.hidden = route.view === 'wiki';
+		if (sidebarProject) sidebarProject.hidden = route.view !== 'project';
+		if (aside) aside.hidden = route.view === 'sprints';
+		// Collapse the grid to a single full-width column when the sidebar is gone.
+		if (layout) layout.classList.toggle('app-layout--no-sidebar', route.view === 'sprints');
 
 		// Update tabs
 		tabs.forEach(function (tab) {
@@ -87,6 +93,18 @@
 		// If the requested sprint doesn't exist, fall back to the first section.
 		if (!matched && sections.length > 0) {
 			sections.forEach(function (s, i) { s.hidden = i !== 0; });
+			target = sections[0].dataset.sprint;
+		}
+		// Mirror the selection in the sidebar: show only this sprint's epics.
+		var epicGroups = document.querySelectorAll('.sidebar-nav__sprint-epics');
+		var sidebarMatched = false;
+		epicGroups.forEach(function (group) {
+			var show = group.dataset.sprint === target;
+			group.hidden = !show;
+			if (show) sidebarMatched = true;
+		});
+		if (!sidebarMatched && epicGroups.length > 0) {
+			epicGroups.forEach(function (g, i) { g.hidden = i !== 0; });
 		}
 		currentSprintId = target;
 		showProjectDashboard();

@@ -57,20 +57,17 @@ export function SidebarNav({ modules, artifacts, epics, sprints, activeSprintId,
 		)
 		.join('\n');
 
-	// Project sidebar: Sprints link + per-sprint epics with stories + categorized artifacts.
-	// With several sprints, group the epics under each initiative so the tree mirrors the
-	// parallel work (active sprint first); a single sprint keeps the flat Epics list.
+	// Project sidebar shows only the CURRENT sprint's epics — one hideable group per sprint,
+	// with the active one visible by default; the client swaps groups as you change sprints.
+	// Projects without sprints keep a single flat list.
 	const boards = (sprints || []).filter((s) => (s.epics || []).length > 0);
-	const epicsList = boards.length > 1
+	const epicsList = boards.length > 0
 		? boards.map((board) => `
-		<li class="sidebar-nav__feature-group">
-			<h3 class="sidebar-nav__feature-heading${board.id === activeSprintId ? ' sidebar-nav__feature-heading--active' : ''}">
-				<a href="#project?sprint=${encodeURIComponent(board.id)}" class="sidebar-nav__feature-link">${escapeHtml(board.label)}</a>
-				<span class="sidebar-nav__count">${board.stories.done}/${board.stories.total}</span>
-			</h3>
+		<div class="sidebar-nav__sprint-epics" data-sprint="${escapeHtml(board.id)}"${board.id === activeSprintId ? '' : ' hidden'}>
+			<div class="sidebar-nav__sprint-caption">${escapeHtml(board.label)} <span class="sidebar-nav__count">${board.stories.done}/${board.stories.total}</span></div>
 			<ul class="sidebar-nav__list">${renderEpicItems(board.epics)}</ul>
-		</li>`).join('\n')
-		: renderEpicItems(epics || []);
+		</div>`).join('\n')
+		: `<ul class="sidebar-nav__list">${renderEpicItems(epics || [])}</ul>`;
 
 	// Build categorized artifact sections
 	const groups = artifactGroups || {};
@@ -116,7 +113,7 @@ export function SidebarNav({ modules, artifacts, epics, sprints, activeSprintId,
 			<span>&#128202;</span> All sprints
 		</a>
 		${epicsList ? `<h2 class="sidebar-nav__heading">Epics</h2>
-		<ul class="sidebar-nav__list">${epicsList}</ul>` : ''}
+		${epicsList}` : ''}
 		${categorySections ? `<h2 class="sidebar-nav__heading">Artifacts</h2>
 		<ul class="sidebar-nav__list">${categorySections}</ul>` : ''}
 	</div>

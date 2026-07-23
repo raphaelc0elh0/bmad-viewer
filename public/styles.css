@@ -308,3 +308,11 @@ mark.search-highlight{background:rgba(245,158,11,.4);color:var(--text);border-ra
 .sidebar-nav__feature-link{color:inherit;text-decoration:none}
 .sidebar-nav__feature-link:hover{color:var(--primary)}
 .sidebar-nav__feature-heading--active .sidebar-nav__feature-link{color:var(--primary)}
+
+/* Sidebar: current-sprint epic group caption */
+.sidebar-nav__sprint-epics[hidden]{display:none}
+.sidebar-nav__sprint-caption{display:flex;align-items:center;gap:6px;margin:2px 0 8px;padding:0 8px;font-size:.8rem;font-weight:700;color:var(--text)}
+.app-layout__sidebar[hidden]{display:none}
+
+/* Full-width layout when the sidebar is hidden (sprints gallery) */
+.app-layout--no-sidebar{grid-template-columns:1fr}
